@@ -52,8 +52,8 @@ const INIT_CONFIG_FIELDS = new Map([
   ['congestionThreshold', { index: 4, mask: 8, minimum: 1 }],
   ['want', { index: 5, mask: 16, minimum: 0 }],
   ['asyncRead', { index: 6, mask: 32, boolean: true }],
-  // The kernel's FILESYSTEM_MAX_STACK_DEPTH is 2.
-  ['maxBackingStackDepth', { index: 7, mask: 64, minimum: 0, maximum: 2 }]
+  // FILESYSTEM_MAX_STACK_DEPTH (2) includes the FUSE passthrough layer.
+  ['maxBackingStackDepth', { index: 7, mask: 64, minimum: 0, maximum: 1 }]
 ])
 const ENHANCED_OPERATIONS = new Map([
   ['initWithConfig', binding.op_init],

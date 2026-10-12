@@ -1267,40 +1267,32 @@ tape('passthrough backing ids are validated before the native boundary', functio
 })
 
 tape('maxBackingStackDepth is encoded in its own init slot and bounded', function (t) {
-  const depths = [1, 3]
   const reported = []
-  const fuse = new Fuse('/tmp/fuse-napi-backing-stack-depth', {
-    initWithConfig (connection, cb) {
-      cb(0, { maxBackingStackDepth: depths.shift() })
-    }
-  }, {
-    onError (err, operation) {
-      reported.push([operation, err.message])
-    }
-  })
-  fuse._waitForMount = () => {}
-
-  fuse._op_init(function (err, config) {
-    t.equal(err, 0, 'a stack depth within the kernel limit is accepted')
-    t.deepEqual([...config], [64, 0, 0, 0, 0, 0, 0, 1], 'only the stack depth slot and mask are set')
-  }, 7, 29, 1, 131072, 65536, 0b1111, 0, 16, 12, 262144)
-
-  const second = new Fuse('/tmp/fuse-napi-backing-stack-depth-limit', {
-    initWithConfig (connection, cb) {
-      cb(0, { maxBackingStackDepth: depths.shift() })
-    }
-  }, {
-    onError (err, operation) {
-      reported.push([operation, err.message])
-    }
-  })
-  second._waitForMount = () => {}
-  second._op_init(function (err) {
-    t.equal(err, Fuse.EIO, 'a depth beyond FILESYSTEM_MAX_STACK_DEPTH is refused')
-  }, 7, 29, 1, 131072, 65536, 0b1111, 0, 16, 12, 262144)
+  for (const depth of [0, 1, 2, 3]) {
+    const fuse = new Fuse(`/tmp/fuse-napi-backing-stack-depth-${depth}`, {
+      initWithConfig (connection, cb) {
+        cb(0, { maxBackingStackDepth: depth })
+      }
+    }, {
+      onError (err, operation) {
+        reported.push([operation, err.message])
+      }
+    })
+    fuse._waitForMount = () => {}
+    fuse._op_init(function (err, config) {
+      if (depth > 1) {
+        t.equal(err, Fuse.EIO, `backing depth ${depth} is refused before native negotiation`)
+        t.equal(config, undefined, 'no invalid configuration reaches the native boundary')
+      } else {
+        t.equal(err, 0, `backing depth ${depth} is accepted`)
+        t.deepEqual([...config], [64, 0, 0, 0, 0, 0, 0, depth], 'only the stack depth slot and mask are set')
+      }
+    }, 7, 29, 1, 131072, 65536, 0b1111, 0, 16, 12, 262144)
+  }
 
   t.deepEqual(reported, [
-    ['init', 'init configuration.maxBackingStackDepth must be at most 2']
+    ['init', 'init configuration.maxBackingStackDepth must be at most 1'],
+    ['init', 'init configuration.maxBackingStackDepth must be at most 1']
   ], 'the refusal names the field and the limit')
   t.end()
 })

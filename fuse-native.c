@@ -2497,7 +2497,10 @@ NAPI_METHOD(fuse_native_signal_init) {
          congestion_threshold > max_background) ||
         ((mask & (FUSE_INIT_CONFIG_WANT | FUSE_INIT_CONFIG_ASYNC_READ)) != 0 &&
          (want & ~l->conn->capable) != 0) ||
-        ((mask & FUSE_INIT_CONFIG_ASYNC_READ) != 0 && async_read > 1U)) {
+        ((mask & FUSE_INIT_CONFIG_ASYNC_READ) != 0 && async_read > 1U) ||
+        /* The total stack-depth limit of 2 includes this FUSE layer. */
+        ((mask & FUSE_INIT_CONFIG_MAX_BACKING_STACK_DEPTH) != 0 &&
+         config[7] > 1U)) {
       res = -EINVAL;
     } else {
       if ((mask & FUSE_INIT_CONFIG_MAX_WRITE) != 0) l->conn->max_write = max_write;

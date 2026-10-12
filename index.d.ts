@@ -82,11 +82,11 @@ declare namespace Fuse {
     want?: number;
     asyncRead?: boolean;
     /**
-     * Stacking depth (0 to 2) allowed below a passthrough backing file, for
+     * Stacking depth (0 or 1) allowed below a passthrough backing file, for
      * example 1 when backing files live on overlayfs. Ignored when built
      * against libfuse older than 3.17.
      */
-    maxBackingStackDepth?: number;
+    maxBackingStackDepth?: 0 | 1;
   }
 
   export interface EnvironmentReport {

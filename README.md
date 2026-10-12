@@ -279,22 +279,75 @@ a file to the kernel, which then serves that handle's reads, writes, and
 `mmap` from a local backing file without calling `read` or `write`.
 Metadata operations still reach the filesystem.
 
+This example uses `backingPathFor(path)` to locate the backing file and
+`otherOperations` for metadata and ordinary `read`/`write` handlers. It
+shares registrations by the backing file's device and inode, including
+hard links, and releases each registration after its last handle closes.
+Opening and closing descriptors is asynchronous; registering an id and
+updating its reference count happen together without yielding.
+
 ```js
-const ops = {
+const backingFiles = new Map()
+const openHandles = new Map()
+const passthroughUnavailable = new Set(['ENOTSUP', 'ENOTTY', 'EPERM', 'ELOOP'])
+let passthroughEnabled = false
+
+function failOpen (fd, err, cb) {
+  fs.close(fd, () => cb(Fuse[err.code] || Fuse.EIO))
+}
+
+const fuse = new Fuse(mountpoint, {
+  ...otherOperations,
   initWithConfig (connection, cb) {
+    passthroughEnabled = (connection.capable & Fuse.CAP_PASSTHROUGH) !== 0
     const want = connection.want |
       (connection.capable & Fuse.CAP_PASSTHROUGH)
-    cb(0, { want })
+    // Permit backing files on one stacked filesystem, such as overlayfs.
+    cb(0, { want, maxBackingStackDepth: 1 })
   },
   open (path, flags, cb) {
-    const fd = fs.openSync(backingPathFor(path), flags)
-    try {
-      cb(0, { fd, backingId: fuse.backingOpen(fd) })
-    } catch {
-      cb(0, fd) // Not available: serve read and write as usual.
+    fs.open(backingPathFor(path), flags, (err, fd) => {
+      if (err) return cb(Fuse[err.code] || Fuse.EIO)
+      fs.fstat(fd, { bigint: true }, (err, stat) => {
+        if (err) return failOpen(fd, err, cb)
+        const key = `${stat.dev}:${stat.ino}`
+        let entry = backingFiles.get(key)
+        if (!entry && passthroughEnabled) {
+          try {
+            entry = { key, id: fuse.backingOpen(fd), refs: 0 }
+            backingFiles.set(key, entry)
+          } catch (err) {
+            if (!passthroughUnavailable.has(err.code)) return failOpen(fd, err, cb)
+          }
+        }
+        if (entry) {
+          entry.refs++
+          openHandles.set(fd, entry)
+          cb(0, { fd, backingId: entry.id })
+        } else {
+          cb(0, fd) // Passthrough unavailable: use ordinary read and write.
+        }
+      })
+    })
+  },
+  release (path, fd, cb) {
+    const entry = openHandles.get(fd)
+    openHandles.delete(fd)
+    let backingError = null
+    if (entry && --entry.refs === 0) {
+      backingFiles.delete(entry.key)
+      try {
+        fuse.backingClose(entry.id)
+      } catch (err) {
+        backingError = err
+      }
     }
+    fs.close(fd, err => {
+      err = backingError || err
+      cb(err ? Fuse[err.code] || Fuse.EIO : 0)
+    })
   }
-}
+})
 ```
 
 `backingOpen(fd)` registers a regular file's descriptor and returns a

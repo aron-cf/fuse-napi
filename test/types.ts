@@ -24,6 +24,14 @@ invalidationFuse.invalidateEntry('/file', err => {
 const backingId: number = invalidationFuse.backingOpen(3)
 invalidationFuse.backingClose(backingId)
 
+const unstackedBacking: Fuse.InitConfig = { maxBackingStackDepth: 0 }
+const stackedBacking: Fuse.InitConfig = { maxBackingStackDepth: 1 }
+// @ts-expect-error The total stack-depth limit includes the FUSE layer.
+const invalidBackingDepth: Fuse.InitConfig = { maxBackingStackDepth: 2 }
+void unstackedBacking
+void stackedBacking
+void invalidBackingDepth
+
 new Fuse(mountpoint, {
   initWithConfig (connection, cb) {
     const maxRead: number = connection.maxRead

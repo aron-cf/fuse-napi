@@ -92,7 +92,7 @@
     "access": "public"
   },
   "scripts": {
-    "check": "node --check index.js && node --check example.js && node --check lib/environment.js && node --check lib/fuse3-options.js && node --check lib/macfuse.js && node --check lib/native-binding.js && node --check scripts/fuse-config.js && node --check scripts/modern-operations-smoke.js && node --check scripts/mount-soak.js && node --check scripts/open-release-soak.js && node --check scripts/package-mount-smoke.js && node --check scripts/verify-release.js && node --check scripts/write-leak-soak.js && node --check test/fixtures/modern-operations-runner.js && node --check test/invalidation.js && node --check test/modern-operations.js && node --check test/option-fuzz.js && node --check test/privileged/broken-mount.js",
+    "check": "node --check index.js && node --check example.js && node --check lib/environment.js && node --check lib/fuse3-options.js && node --check lib/macfuse.js && node --check lib/native-binding.js && node --check scripts/fuse-config.js && node --check scripts/modern-operations-smoke.js && node --check scripts/mount-soak.js && node --check scripts/open-release-soak.js && node --check scripts/package-mount-smoke.js && node --check scripts/verify-release.js && node --check scripts/write-leak-soak.js && node --check test/fixtures/modern-operations-runner.js && node --check test/invalidation.js && node --check test/modern-operations.js && node --check test/option-fuzz.js && node --check test/privileged/broken-mount.js && node --check test/fixtures/passthrough-example.js && node --check test/passthrough-example.js",
     "install": "node-gyp-build",
     "test": "tape test/*.js",
     "test:package-mount": "node scripts/package-mount-smoke.js",
@@ -101,7 +101,7 @@
     "test:soak": "node --expose-gc scripts/mount-soak.js",
     "test:open-release": "node --expose-gc scripts/open-release-soak.js",
     "test:write-leak": "node --expose-gc scripts/write-leak-soak.js",
-    "test:unit": "tape test/dependencies.js test/environment.js test/errno.js test/hardening.js test/mount-ready.js test/options.js test/release.js",
+    "test:unit": "tape test/dependencies.js test/environment.js test/errno.js test/hardening.js test/mount-ready.js test/options.js test/passthrough-example.js test/release.js",
     "test:types": "tsc -p tsconfig.json",
     "clean": "rm -rf node_modules build",
     "prebuild": "prebuildify --strip --no-napi --node-gyp node_modules/.bin/node-gyp",
