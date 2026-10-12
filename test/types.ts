@@ -111,6 +111,7 @@ new Fuse(mountpoint, {
 }, {
   maxConcurrency: 4,
   maxRead: 262144,
+  useIno: true,
   nullPathOk: true,
   timeout: { default: 1000, readBuffer: 2000 }
 })

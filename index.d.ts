@@ -493,6 +493,14 @@ declare namespace Fuse {
     directIo?: boolean;
     /** Historical native spelling for directIo. */
     direct_io?: boolean;
+    /**
+     * Report the `ino` returned by getattr as st_ino, through
+     * fuse_config.use_ino. Without it libfuse substitutes its own node
+     * ids, so two hard links to one file stat as different inodes.
+     */
+    useIno?: boolean;
+    /** Native libfuse spelling for useIno. */
+    use_ino?: boolean;
     umask?: number;
     entryTimeout?: number;
     /** Native libfuse spelling for entryTimeout. */

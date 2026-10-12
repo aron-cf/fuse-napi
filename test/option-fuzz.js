@@ -7,7 +7,7 @@ const Fuse = require('..')
 let state = 0x6d2b79f5
 const known = [
   'allowOther', 'allowRoot', 'autoUnmount', 'defaultPermissions',
-  'kernelCache', 'autoCache', 'directIo', 'noforget', 'remember',
+  'kernelCache', 'autoCache', 'directIo', 'useIno', 'noforget', 'remember',
   'entryTimeout', 'attrTimeout', 'maxConcurrency', 'modules', 'fsname'
 ]
 

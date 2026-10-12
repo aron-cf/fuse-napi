@@ -68,6 +68,7 @@ tape('native libfuse option names are normalized aliases', function (t) {
     ['entry_timeout', 'entryTimeout', 1.5, '-oentry_timeout=1.5'],
     ['attr_timeout', 'attrTimeout', 2.5, '-oattr_timeout=2.5'],
     ['direct_io', 'directIo', true, ''],
+    ['use_ino', 'useIno', true, ''],
     ['nopath', 'noPath', true, '']
   ]
 

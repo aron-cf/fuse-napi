@@ -107,6 +107,7 @@ configurations before libfuse is invoked.
 | `kernelCache` | `kernel_cache` | Yes | Yes | Cannot be combined with `autoCache` or `directIo`. |
 | `autoCache` | `auto_cache` | Yes | Yes | Cannot be combined with `kernelCache` or `directIo`. |
 | `directIo` | `fuse_config.direct_io` | Yes | Yes | Cannot be combined with page-cache policies. This is separate from returning `directIO` for one `open` or `create` result. |
+| `useIno` | `fuse_config.use_ino` | Yes | Yes | Reports the `ino` returned by `getattr` as `st_ino` instead of libfuse node ids, so hard links share one inode number. |
 | `umask` | `umask=<mask>` | Yes | Yes | Explicit zero is preserved; chmod behavior is covered. |
 | `uid` | `uid=<n>` | Yes | Yes | Explicit zero is preserved; ownership behavior is covered. |
 | `gid` | `gid=<n>` | Yes | Yes | Explicit zero is preserved; ownership behavior is covered. |
@@ -135,7 +136,8 @@ paths on Linux, must run outside filesystem operation callbacks, and reports
 Historical native libfuse spellings are normalized before validation:
 `allow_other`, `allow_root`, `auto_unmount`, `default_permissions`,
 `max_read`, `user_id`, `kernel_cache`, `auto_cache`, `direct_io`,
-`entry_timeout`, `attr_timeout`, `ac_attr_timeout`, `nonempty`, and `nopath`.
+`use_ino`, `entry_timeout`, `attr_timeout`, `ac_attr_timeout`, `nonempty`,
+and `nopath`.
 Removed or internal spellings therefore receive the same actionable FUSE 3
 error as their JavaScript equivalent. Supplying both forms with different
 values is an error.
