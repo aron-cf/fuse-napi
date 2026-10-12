@@ -34,6 +34,7 @@ tape('zero-valued numeric mount options are preserved', function (t) {
     gid: 0,
     entryTimeout: 0,
     attrTimeout: 0,
+    negativeTimeout: 0,
     acAttrTimeout: 0,
     remember: 0
   })
@@ -48,6 +49,7 @@ tape('zero-valued numeric mount options are preserved', function (t) {
       'gid=0',
       'entry_timeout=0',
       'attr_timeout=0',
+      'negative_timeout=0',
       'ac_attr_timeout=0',
       'remember=0'
     ],
@@ -67,6 +69,7 @@ tape('native libfuse option names are normalized aliases', function (t) {
     ['auto_cache', 'autoCache', true, '-oauto_cache'],
     ['entry_timeout', 'entryTimeout', 1.5, '-oentry_timeout=1.5'],
     ['attr_timeout', 'attrTimeout', 2.5, '-oattr_timeout=2.5'],
+    ['negative_timeout', 'negativeTimeout', 0.5, '-onegative_timeout=0.5'],
     ['direct_io', 'directIo', true, ''],
     ['nopath', 'noPath', true, '']
   ]

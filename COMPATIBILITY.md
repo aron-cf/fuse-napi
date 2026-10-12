@@ -112,6 +112,7 @@ configurations before libfuse is invoked.
 | `gid` | `gid=<n>` | Yes | Yes | Explicit zero is preserved; ownership behavior is covered. |
 | `entryTimeout` | `entry_timeout=<s>` | Yes | Yes | Controls lookup caching. |
 | `attrTimeout` | `attr_timeout=<s>` | Yes | Yes | Controls attribute caching. |
+| `negativeTimeout` | `negative_timeout=<s>` | Yes | Yes | Controls caching of failed lookups. Explicit zero is preserved. |
 | `acAttrTimeout` | `ac_attr_timeout=<s>` | Yes | Yes | Requires `autoCache: true`. |
 | `noforget` | `noforget` | Yes | Yes | Mutually exclusive with `remember`; high memory-retention risk. |
 | `nonEmpty` | Rejected when enabled | Removed | Removed | FUSE 3 permits non-empty mountpoints without this FUSE 2 option. |
@@ -135,7 +136,8 @@ paths on Linux, must run outside filesystem operation callbacks, and reports
 Historical native libfuse spellings are normalized before validation:
 `allow_other`, `allow_root`, `auto_unmount`, `default_permissions`,
 `max_read`, `user_id`, `kernel_cache`, `auto_cache`, `direct_io`,
-`entry_timeout`, `attr_timeout`, `ac_attr_timeout`, `nonempty`, and `nopath`.
+`entry_timeout`, `attr_timeout`, `negative_timeout`, `ac_attr_timeout`,
+`nonempty`, and `nopath`.
 Removed or internal spellings therefore receive the same actionable FUSE 3
 error as their JavaScript equivalent. Supplying both forms with different
 values is an error.

@@ -503,6 +503,13 @@ declare namespace Fuse {
     acAttrTimeout?: number;
     /** Native libfuse spelling for acAttrTimeout. */
     ac_attr_timeout?: number;
+    /**
+     * Seconds the kernel caches a failed lookup (`negative_timeout`).
+     * libfuse defaults to 0, which disables negative caching.
+     */
+    negativeTimeout?: number;
+    /** Native libfuse spelling for negativeTimeout. */
+    negative_timeout?: number;
     noforget?: boolean;
     remember?: number;
     modules?: string;

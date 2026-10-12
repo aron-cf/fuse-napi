@@ -17,6 +17,8 @@ new Fuse(mountpoint, {
   }
 })
 
+new Fuse(mountpoint, {}, { negative_timeout: 1.5 })
+
 const invalidationFuse = new Fuse(mountpoint, {})
 invalidationFuse.invalidateEntry('/file', err => {
   if (err) throw err
@@ -111,6 +113,7 @@ new Fuse(mountpoint, {
 }, {
   maxConcurrency: 4,
   maxRead: 262144,
+  negativeTimeout: 0,
   nullPathOk: true,
   timeout: { default: 1000, readBuffer: 2000 }
 })

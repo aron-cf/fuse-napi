@@ -187,6 +187,7 @@ Create a new `Fuse` object.
   force: false,        // Recover a disconnected mount before remounting.
   mkdir: false,        // Create the mountpoint before mounting.
   directIo: false,     // Set fuse_config.direct_io for every opened file.
+  negativeTimeout: 0,  // Seconds to cache failed lookups (negative_timeout).
   maxRead: 262144,     // Set max_read and the matching init connection limit.
   timeout: 15000,      // Operation and mount-start timeout in milliseconds.
   maxConcurrency: 4,   // Fixed native request-worker count (1 through 64).

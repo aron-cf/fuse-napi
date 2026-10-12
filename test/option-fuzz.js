@@ -8,7 +8,8 @@ let state = 0x6d2b79f5
 const known = [
   'allowOther', 'allowRoot', 'autoUnmount', 'defaultPermissions',
   'kernelCache', 'autoCache', 'directIo', 'noforget', 'remember',
-  'entryTimeout', 'attrTimeout', 'maxConcurrency', 'modules', 'fsname'
+  'entryTimeout', 'attrTimeout', 'negativeTimeout', 'maxConcurrency',
+  'modules', 'fsname'
 ]
 
 for (let iteration = 0; iteration < 20000; iteration++) {
