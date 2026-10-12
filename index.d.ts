@@ -44,6 +44,14 @@ declare namespace Fuse {
     directIO?: boolean;
     keepCache?: boolean;
     nonseekable?: boolean;
+    /**
+     * Backing id from `backingOpen()`, for open and create only. When > 0
+     * the kernel serves this handle's reads, writes and mmap from the
+     * backing file directly. Cannot be combined with `keepCache` or
+     * `directIO`, nor with the `kernelCache`, `autoCache` or `directIo`
+     * mount options.
+     */
+    backingId?: number;
   }
 
   export interface PollHandle {
@@ -73,6 +81,12 @@ declare namespace Fuse {
     congestionThreshold?: number;
     want?: number;
     asyncRead?: boolean;
+    /**
+     * Stacking depth (0 to 2) allowed below a passthrough backing file, for
+     * example 1 when backing files live on overlayfs. Ignored when built
+     * against libfuse older than 3.17.
+     */
+    maxBackingStackDepth?: number;
   }
 
   export interface EnvironmentReport {
@@ -681,6 +695,18 @@ declare class Fuse {
    * Returns EAGAIN through the callback when the bounded native queue is full.
    */
   public invalidateEntry: (path: string, cb?: (err?: null | Error) => any) => void;
+  /**
+   * Register an open file descriptor as a passthrough backing file and
+   * return its backing id, to return from open or create as
+   * `{ fd, backingId }`. Linux 6.9+ with libfuse 3.17+, after the mount
+   * negotiated `Fuse.CAP_PASSTHROUGH`. Throws an Error with an errno
+   * `code` on failure.
+   */
+  public backingOpen: (fd: number) => number;
+  /** Release a backing id returned by `backingOpen()`. */
+  public backingClose: (backingId: number) => void;
+  /** `FUSE_CAP_PASSTHROUGH`, to request in `initWithConfig`'s `want`. */
+  public static CAP_PASSTHROUGH: number;
   public context: () => Readonly<Fuse.RequestContext> | null;
   public errno: (code?: string) => number;
 

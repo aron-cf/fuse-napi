@@ -272,6 +272,52 @@ threads, outstanding JavaScript callbacks, and memory use under load. Mount
 startup runs outside the JavaScript event loop and remains subject to the
 configured `init` deadline.
 
+### Kernel passthrough (Linux)
+
+On Linux 6.9+ with libfuse 3.17+, an `open` or `create` handler can hand
+a file to the kernel, which then serves that handle's reads, writes, and
+`mmap` from a local backing file without calling `read` or `write`.
+Metadata operations still reach the filesystem.
+
+```js
+const ops = {
+  initWithConfig (connection, cb) {
+    const want = connection.want |
+      (connection.capable & Fuse.CAP_PASSTHROUGH)
+    cb(0, { want })
+  },
+  open (path, flags, cb) {
+    const fd = fs.openSync(backingPathFor(path), flags)
+    try {
+      cb(0, { fd, backingId: fuse.backingOpen(fd) })
+    } catch {
+      cb(0, fd) // Not available: serve read and write as usual.
+    }
+  }
+}
+```
+
+`backingOpen(fd)` registers a regular file's descriptor and returns a
+backing id. It throws an Error whose `code` is the errno: `EPERM` when the
+mount did not negotiate `Fuse.CAP_PASSTHROUGH` or the process lacks
+`CAP_SYS_ADMIN`, `ELOOP` when the backing file is stacked deeper than
+`maxBackingStackDepth` allows, `ENOTTY` on a kernel without passthrough,
+and `ENOTSUP` when fuse-napi was built against libfuse older than 3.17.
+The kernel opens its own backing file per handle
+with that handle's open flags, so one id can serve every open of a file. It
+allows one backing file per inode: a second id for an inode that already has
+open passthrough handles fails those opens with `EIO`, so share one id per
+inode and release it with `backingClose(id)` after the last handle using it
+is released.
+
+A `backingId` cannot be combined with `keepCache` or `directIO`, nor with
+the `kernelCache`, `autoCache`, or `directIo` mount options; the kernel
+would fail the open with `EIO`, so fuse-napi rejects it first. When backing
+files live on a stacked filesystem such as overlayfs, also return
+`maxBackingStackDepth: 1` from `initWithConfig`. The kernel requires
+`CAP_SYS_ADMIN` in the initial user namespace for `backingOpen` and
+`backingClose`.
+
 ### Namespace cache housekeeping
 
 Every distinct path resolved by the kernel creates a reachable high-level
@@ -342,8 +388,9 @@ snapshot of the portable FUSE 3 connection fields:
 `maxRead`, `capable`, `want`, `maxBackground`, and `congestionThreshold`.
 
 The callback may return a conservative configuration containing `maxWrite`,
-`maxReadahead`, `maxBackground`, `congestionThreshold`, `want`, and/or
-`asyncRead`.
+`maxReadahead`, `maxBackground`, `congestionThreshold`, `want`,
+`asyncRead`, and/or `maxBackingStackDepth` (see
+[Kernel passthrough](#kernel-passthrough-linux)).
 Requested limits may not exceed the values supplied by the kernel, `want`
 must be a subset of `capable`, and the congestion threshold may not exceed
 the background-request limit. Omitting the configuration preserves all

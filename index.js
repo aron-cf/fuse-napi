@@ -38,11 +38,11 @@ const OPERATION_FLAG_DIRECT_IO = 8
 const OPERATION_FLAG_POLL_HANDLE = 16
 const MAX_SAFE_BIGINT = BigInt(Number.MAX_SAFE_INTEGER)
 const XATTR_NOT_FOUND = -(os.constants.errno.ENOATTR || os.constants.errno.ENODATA || 61)
-const EMPTY_INIT_CONFIG = new Uint32Array(7)
+const EMPTY_INIT_CONFIG = new Uint32Array(8)
 const FILE_INFO_DIRECT_IO = 1
 const FILE_INFO_KEEP_CACHE = 2
 const FILE_INFO_NONSEEKABLE = 4
-const FILE_INFO_RESULT_FIELDS = new Set(['fd', 'directIO', 'keepCache', 'nonseekable'])
+const FILE_INFO_RESULT_FIELDS = new Set(['fd', 'directIO', 'keepCache', 'nonseekable', 'backingId'])
 const requestContexts = new AsyncLocalStorage()
 const activeRequestContexts = new WeakSet()
 const INIT_CONFIG_FIELDS = new Map([
@@ -51,7 +51,9 @@ const INIT_CONFIG_FIELDS = new Map([
   ['maxBackground', { index: 3, mask: 4, minimum: 1 }],
   ['congestionThreshold', { index: 4, mask: 8, minimum: 1 }],
   ['want', { index: 5, mask: 16, minimum: 0 }],
-  ['asyncRead', { index: 6, mask: 32, boolean: true }]
+  ['asyncRead', { index: 6, mask: 32, boolean: true }],
+  // The kernel's FILESYSTEM_MAX_STACK_DEPTH is 2.
+  ['maxBackingStackDepth', { index: 7, mask: 64, minimum: 0, maximum: 2 }]
 ])
 const ENHANCED_OPERATIONS = new Map([
   ['initWithConfig', binding.op_init],
@@ -978,7 +980,7 @@ class Fuse extends Nanoresource {
   _op_open (signal, path, flags) {
     return this.ops.open(path, flags, (err, result) => {
       if (err) return signal(err)
-      return this._respond(signal, 'open', [], () => signal(0, ...normalizeOpenResult(result)))
+      return this._respond(signal, 'open', [], () => signal(0, ...normalizeOpenResult(result, this.opts)))
     })
   }
 
@@ -992,7 +994,7 @@ class Fuse extends Nanoresource {
   _op_create (signal, path, mode, flags) {
     const complete = (err, result) => {
       if (err) return signal(err)
-      return this._respond(signal, 'create', [], () => signal(0, ...normalizeOpenResult(result)))
+      return this._respond(signal, 'create', [], () => signal(0, ...normalizeOpenResult(result, this.opts)))
     }
     if (this.ops.createWithFlags) return this.ops.createWithFlags(path, mode, flags, complete)
     return this.ops.create(path, mode, complete)
@@ -1434,6 +1436,38 @@ class Fuse extends Nanoresource {
     return this.close(cb)
   }
 
+  /**
+   * Register an open file descriptor with the kernel as a passthrough
+   * backing file (Linux 6.9+, libfuse 3.17+). Returns a backing id to hand
+   * back from open or create as { fd, backingId }; the kernel then serves
+   * that handle's reads, writes and mmap from the backing file without
+   * calling read or write. Throws an Error with an errno code on failure,
+   * for example EPERM when the mount did not negotiate CAP_PASSTHROUGH.
+   */
+  backingOpen (fd) {
+    if (!Number.isInteger(fd) || fd < 0 || fd > MAX_INT32) {
+      throw new TypeError('backingOpen requires a file descriptor')
+    }
+    if (!this._nativeMounted || !this._thread) throw notMountedError()
+    const result = binding.fuse_native_backing_open(this._thread, fd)
+    if (result > 0) return result
+    throw backingError('Failed to register a FUSE passthrough backing file', result)
+  }
+
+  /**
+   * Release a backing id from backingOpen. Open handles that already use it
+   * keep working; call it once no further open will return the id.
+   */
+  backingClose (backingId) {
+    if (!Number.isInteger(backingId) || backingId <= 0 || backingId > MAX_INT32) {
+      throw new TypeError('backingClose requires a backing id')
+    }
+    if (!this._nativeMounted || !this._thread) throw notMountedError()
+    const result = binding.fuse_native_backing_close(this._thread, backingId)
+    if (result === 0) return
+    throw backingError('Failed to release a FUSE passthrough backing file', result)
+  }
+
   invalidateEntry (entryPath, cb) {
     if (typeof cb !== 'function') cb = () => {}
 
@@ -1633,6 +1667,8 @@ Fuse.ENOMEDIUM = -123
 Fuse.EMEDIUMTYPE = -124
 Fuse.UTIME_NOW = UTIME_NOW
 Fuse.UTIME_OMIT = UTIME_OMIT
+// fuse_common.h FUSE_CAP_PASSTHROUGH, for initWithConfig's want.
+Fuse.CAP_PASSTHROUGH = 1 << 29
 
 for (const [name, value] of Object.entries(os.constants.errno)) {
   Fuse[name] = -value
@@ -1933,10 +1969,27 @@ function normalizeInvalidationPath (entryPath) {
 }
 
 function invalidationErrorCode (result) {
+  return errnoCode(result) || 'EFUSEINVALIDATE'
+}
+
+function errnoCode (result) {
   for (const [code, errno] of Object.entries(os.constants.errno)) {
     if (result === -errno) return code
   }
-  return 'EFUSEINVALIDATE'
+  return undefined
+}
+
+function notMountedError () {
+  const err = new Error('FUSE filesystem is not mounted')
+  err.code = 'ENOTCONN'
+  return err
+}
+
+function backingError (message, result) {
+  const err = new Error(message)
+  err.errno = result
+  err.code = errnoCode(result) || 'EIO'
+  return err
 }
 
 function normalizeTimeoutOption (timeout) {
@@ -2098,10 +2151,13 @@ function normalizeFileHandle (value) {
   return toUint64Value(value, 'file handle')
 }
 
-function normalizeOpenResult (result) {
+// mountOptions is passed for open and create, whose results may carry a
+// passthrough backingId; opendir omits it and keeps the two-value result.
+function normalizeOpenResult (result, mountOptions) {
   if (result === null || result === undefined ||
       typeof result === 'number' || typeof result === 'bigint') {
-    return [normalizeFileHandle(result), 0]
+    const handle = normalizeFileHandle(result)
+    return mountOptions ? [handle, 0, 0] : [handle, 0]
   }
   if (typeof result !== 'object' || Array.isArray(result)) {
     throw new TypeError('open result must be a file handle or file-info object')
@@ -2126,11 +2182,36 @@ function normalizeOpenResult (result) {
     }
   }
 
+  const backingId = result.backingId ?? 0
+  if (result.backingId !== undefined) {
+    if (!mountOptions) {
+      throw new TypeError('file-info.backingId is only supported by open and create')
+    }
+    if (!Number.isInteger(backingId) || backingId < 0 || backingId > MAX_INT32) {
+      throw new TypeError('file-info.backingId must be a non-negative 32-bit integer')
+    }
+  }
+  // The kernel refuses passthrough together with a kept or bypassed page
+  // cache (fs/fuse/iomode.c) with an opaque EIO from open(). libfuse also
+  // sets keep_cache or direct_io itself on every open for these mount
+  // options, so they are refused here as well.
+  if (backingId > 0) {
+    if (keepCache || directIO) {
+      throw new TypeError('file-info.backingId cannot be combined with keepCache or directIO')
+    }
+    for (const name of ['kernelCache', 'autoCache', 'directIo']) {
+      if (mountOptions[name]) {
+        throw new TypeError(`file-info.backingId cannot be used with the ${name} mount option`)
+      }
+    }
+  }
+
   let flags = 0
   if (directIO) flags |= FILE_INFO_DIRECT_IO
   if (keepCache) flags |= FILE_INFO_KEEP_CACHE
   if (nonseekable) flags |= FILE_INFO_NONSEEKABLE
-  return [normalizeFileHandle(fd), flags]
+  const handle = normalizeFileHandle(fd)
+  return mountOptions ? [handle, flags, backingId] : [handle, flags]
 }
 
 function getReaddirOffsetsArray (offsets, length) {
@@ -2181,7 +2262,7 @@ function getInitConfigArray (connection, requested) {
     throw new TypeError('init configuration must be an object')
   }
 
-  const config = new Uint32Array(7)
+  const config = new Uint32Array(8)
   for (const name of Reflect.ownKeys(requested)) {
     if (typeof name !== 'string') throw new TypeError(`Unknown init configuration property ${String(name)}`)
     const field = INIT_CONFIG_FIELDS.get(name)
@@ -2191,6 +2272,9 @@ function getInitConfigArray (connection, requested) {
       : toUint32(requested[name], `init configuration.${name}`)
     if (value < field.minimum) {
       throw new RangeError(`init configuration.${name} must be at least ${field.minimum}`)
+    }
+    if (field.maximum !== undefined && value > field.maximum) {
+      throw new RangeError(`init configuration.${name} must be at most ${field.maximum}`)
     }
     config[0] |= field.mask
     config[field.index] = value

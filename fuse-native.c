@@ -57,6 +57,22 @@
 #include <sys/sysmacros.h>
 #include <linux/ioctl.h>
 #include <linux/stat.h>
+#include <linux/fuse.h>
+
+/* Build hosts whose kernel headers predate FUSE passthrough (Linux 6.9). */
+#ifndef FUSE_DEV_IOC_BACKING_OPEN
+#ifndef FUSE_DEV_IOC_MAGIC
+#define FUSE_DEV_IOC_MAGIC 229
+#endif
+struct fuse_backing_map {
+  int32_t fd;
+  uint32_t flags;
+  uint64_t padding;
+};
+#define FUSE_DEV_IOC_BACKING_OPEN \
+  _IOW(FUSE_DEV_IOC_MAGIC, 1, struct fuse_backing_map)
+#define FUSE_DEV_IOC_BACKING_CLOSE _IOW(FUSE_DEV_IOC_MAGIC, 2, uint32_t)
+#endif
 #endif
 
 #ifdef __APPLE__
@@ -1171,7 +1187,18 @@ FUSE_METHOD_VOID(access, 2, 0, (const char *path, int mode), {
 #define FUSE_FILE_INFO_ALLOWED_FLAGS \
   (FUSE_FILE_INFO_DIRECT_IO | FUSE_FILE_INFO_KEEP_CACHE | FUSE_FILE_INFO_NONSEEKABLE)
 
-#define FUSE_APPLY_FILE_INFO_RESULT()\
+/*
+ * fuse_file_info.backing_id appeared in libfuse 3.17. Building against an
+ * older libfuse still works; passthrough is then never offered, and
+ * backingOpen() reports ENOTSUP.
+ */
+#if defined(__linux__) && FUSE_VERSION >= FUSE_MAKE_VERSION(3, 17)
+#define FUSE_HAS_BACKING_ID 1
+#else
+#define FUSE_HAS_BACKING_ID 0
+#endif
+
+#define FUSE_PARSE_FILE_INFO_RESULT()\
   uint64_t fd = 0;\
   uint32_t result_flags = 0;\
   if (res == 0 &&\
@@ -1179,7 +1206,9 @@ FUSE_METHOD_VOID(access, 2, 0, (const char *path, int mode), {
        napi_get_value_uint32(env, argv[3], &result_flags) != napi_ok ||\
        (result_flags & ~FUSE_FILE_INFO_ALLOWED_FLAGS) != 0)) {\
     res = -EINVAL;\
-  }\
+  }
+
+#define FUSE_STORE_FILE_INFO_RESULT()\
   if (res == 0 && l->info != NULL) {\
     l->info->fh = fd;\
     l->info->direct_io = (result_flags & FUSE_FILE_INFO_DIRECT_IO) != 0;\
@@ -1187,7 +1216,39 @@ FUSE_METHOD_VOID(access, 2, 0, (const char *path, int mode), {
     l->info->nonseekable = (result_flags & FUSE_FILE_INFO_NONSEEKABLE) != 0;\
   }
 
-FUSE_METHOD(open, 2, 2, (const char *path, struct fuse_file_info *info), {
+#define FUSE_APPLY_FILE_INFO_RESULT()\
+  FUSE_PARSE_FILE_INFO_RESULT()\
+  FUSE_STORE_FILE_INFO_RESULT()
+
+#if FUSE_HAS_BACKING_ID
+#define FUSE_STORE_BACKING_ID(id) l->info->backing_id = (int32_t) (id)
+#else
+#define FUSE_STORE_BACKING_ID(id) (void) (id)
+#endif
+
+/*
+ * open and create also carry a backing id from backingOpen() in argv[4].
+ * libfuse sets FOPEN_PASSTHROUGH whenever it is > 0. The kernel refuses
+ * passthrough combined with keep_cache or direct_io (fs/fuse/iomode.c) with
+ * an opaque EIO from open(), so that combination is rejected here instead.
+ */
+#define FUSE_APPLY_OPEN_RESULT()\
+  FUSE_PARSE_FILE_INFO_RESULT()\
+  uint32_t backing_id = 0;\
+  if (res == 0 &&\
+      (napi_get_value_uint32(env, argv[4], &backing_id) != napi_ok ||\
+       backing_id > INT32_MAX ||\
+       (backing_id > 0 &&\
+        (!FUSE_HAS_BACKING_ID ||\
+         (result_flags & (FUSE_FILE_INFO_KEEP_CACHE | FUSE_FILE_INFO_DIRECT_IO)) != 0)))) {\
+    res = -EINVAL;\
+  }\
+  FUSE_STORE_FILE_INFO_RESULT()\
+  if (res == 0 && l->info != NULL) {\
+    FUSE_STORE_BACKING_ID(backing_id);\
+  }
+
+FUSE_METHOD(open, 2, 3, (const char *path, struct fuse_file_info *info), {
   l->path = path;
   l->info = info;
 }, {
@@ -1198,7 +1259,7 @@ FUSE_METHOD(open, 2, 2, (const char *path, struct fuse_file_info *info), {
     napi_create_uint32(env, 0, &(argv[3]));
   }
 }, {
-  FUSE_APPLY_FILE_INFO_RESULT()
+  FUSE_APPLY_OPEN_RESULT()
 })
 
 FUSE_METHOD(opendir, 2, 2, (const char *path, struct fuse_file_info *info), {
@@ -1215,7 +1276,7 @@ FUSE_METHOD(opendir, 2, 2, (const char *path, struct fuse_file_info *info), {
   FUSE_APPLY_FILE_INFO_RESULT()
 })
 
-FUSE_METHOD(create, 3, 2, (const char *path, mode_t mode, struct fuse_file_info *info), {
+FUSE_METHOD(create, 3, 3, (const char *path, mode_t mode, struct fuse_file_info *info), {
   l->path = path;
   l->mode = mode;
   l->info = info;
@@ -1228,7 +1289,7 @@ FUSE_METHOD(create, 3, 2, (const char *path, mode_t mode, struct fuse_file_info 
     napi_create_uint32(env, 0, &(argv[4]));
   }
 }, {
-  FUSE_APPLY_FILE_INFO_RESULT()
+  FUSE_APPLY_OPEN_RESULT()
 })
 
 FUSE_METHOD_VOID(utimens, 8, 0, (
@@ -2339,10 +2400,12 @@ static int fuse_native_statx (
 #define FUSE_INIT_CONFIG_CONGESTION_THRESHOLD 8U
 #define FUSE_INIT_CONFIG_WANT 16U
 #define FUSE_INIT_CONFIG_ASYNC_READ 32U
+#define FUSE_INIT_CONFIG_MAX_BACKING_STACK_DEPTH 64U
 #define FUSE_INIT_CONFIG_ALLOWED_MASK \
   (FUSE_INIT_CONFIG_MAX_WRITE | FUSE_INIT_CONFIG_MAX_READAHEAD | \
    FUSE_INIT_CONFIG_MAX_BACKGROUND | FUSE_INIT_CONFIG_CONGESTION_THRESHOLD | \
-   FUSE_INIT_CONFIG_WANT | FUSE_INIT_CONFIG_ASYNC_READ)
+   FUSE_INIT_CONFIG_WANT | FUSE_INIT_CONFIG_ASYNC_READ | \
+   FUSE_INIT_CONFIG_MAX_BACKING_STACK_DEPTH)
 
 static void fuse_native_dispatch_init (uv_async_t* handle, fuse_thread_locals_t* l, fuse_thread_t* ft) {
   (void) handle;
@@ -2386,7 +2449,7 @@ NAPI_METHOD(fuse_native_signal_init) {
   if (res == 0 &&
       (l->conn == NULL ||
        get_uint32_array(env, argv[2], &config, &config_length) != 0 ||
-       config_length != 7 ||
+       config_length != 8 ||
        (config[0] & ~FUSE_INIT_CONFIG_ALLOWED_MASK) != 0)) {
     res = -EINVAL;
   }
@@ -2443,6 +2506,15 @@ NAPI_METHOD(fuse_native_signal_init) {
       if ((mask & FUSE_INIT_CONFIG_CONGESTION_THRESHOLD) != 0) {
         l->conn->congestion_threshold = congestion_threshold;
       }
+#if FUSE_HAS_BACKING_ID
+      /*
+       * Lets the kernel accept a passthrough backing file that itself
+       * lives on a stacked filesystem such as overlayfs.
+       */
+      if ((mask & FUSE_INIT_CONFIG_MAX_BACKING_STACK_DEPTH) != 0) {
+        l->conn->max_backing_stack_depth = config[7];
+      }
+#endif
       if ((mask & (FUSE_INIT_CONFIG_WANT | FUSE_INIT_CONFIG_ASYNC_READ)) != 0) {
         l->conn->want = want;
       }
@@ -3691,6 +3763,97 @@ NAPI_METHOD(fuse_native_unmount) {
   return NULL;
 }
 
+#if FUSE_HAS_BACKING_ID
+/*
+ * Run a passthrough ioctl against the session fd of a live mount. The
+ * invalidation mutex is held across the call because teardown clears
+ * ft->fuse under it, so the session cannot be destroyed mid-ioctl. Neither
+ * ioctl waits on a FUSE request, so the lock is held only briefly.
+ *
+ * Returns the ioctl result, or -errno.
+ */
+static int32_t fuse_native_backing_ioctl (fuse_thread_t *ft, int close_id, void *arg) {
+  int32_t result = -ENOTCONN;
+  /*
+   * Teardown sets cleanup_requested on this thread before the cleanup work
+   * can destroy the mutex, so checking it first keeps the lock valid.
+   */
+  if (!ft->mounted ||
+      atomic_load(&(ft->cleanup_requested)) ||
+      !ft->invalidation_mutex_initialized) {
+    return result;
+  }
+
+  uv_mutex_lock(&(ft->invalidation_mut));
+  if (!atomic_load(&(ft->cleanup_requested)) &&
+      !ft->invalidation_stopping &&
+      ft->mounted &&
+      ft->fuse != NULL) {
+    struct fuse_session *session = fuse_get_session(ft->fuse);
+    int session_fd = session == NULL ? -1 : fuse_session_fd(session);
+    if (session_fd >= 0) {
+      int ret = close_id
+        ? ioctl(session_fd, FUSE_DEV_IOC_BACKING_CLOSE, arg)
+        : ioctl(session_fd, FUSE_DEV_IOC_BACKING_OPEN, arg);
+      result = ret >= 0 ? (int32_t) ret : (int32_t) -errno;
+    }
+  }
+  uv_mutex_unlock(&(ft->invalidation_mut));
+  return result;
+}
+#endif
+
+/*
+ * Register a file descriptor with the kernel as a passthrough backing file,
+ * which is what libfuse's low-level fuse_passthrough_open() does. Returning
+ * the id from open or create lets the kernel serve that handle's reads,
+ * writes and mmap from the backing file directly.
+ *
+ * Returns the backing id (> 0), or -errno.
+ */
+NAPI_METHOD(fuse_native_backing_open) {
+  NAPI_ARGV(2)
+  NAPI_ARGV_BUFFER_CAST(fuse_thread_t *, ft, 0);
+  int32_t fd = -1;
+
+  if (ft_len < sizeof(*ft) ||
+      napi_get_value_int32(env, argv[1], &fd) != napi_ok ||
+      fd < 0) {
+    napi_throw_type_error(env, "EINVAL", "Invalid FUSE backing file request");
+    return NULL;
+  }
+
+#if FUSE_HAS_BACKING_ID
+  struct fuse_backing_map map;
+  memset(&map, 0, sizeof(map));
+  map.fd = fd;
+  NAPI_RETURN_INT32(fuse_native_backing_ioctl(ft, 0, &map))
+#else
+  NAPI_RETURN_INT32(-ENOTSUP)
+#endif
+}
+
+/* Release a backing id from fuse_native_backing_open. Returns 0 or -errno. */
+NAPI_METHOD(fuse_native_backing_close) {
+  NAPI_ARGV(2)
+  NAPI_ARGV_BUFFER_CAST(fuse_thread_t *, ft, 0);
+  uint32_t backing_id = 0;
+
+  if (ft_len < sizeof(*ft) ||
+      napi_get_value_uint32(env, argv[1], &backing_id) != napi_ok ||
+      backing_id == 0 ||
+      backing_id > INT32_MAX) {
+    napi_throw_type_error(env, "EINVAL", "Invalid FUSE backing id");
+    return NULL;
+  }
+
+#if FUSE_HAS_BACKING_ID
+  NAPI_RETURN_INT32(fuse_native_backing_ioctl(ft, 1, &backing_id))
+#else
+  NAPI_RETURN_INT32(-ENOTSUP)
+#endif
+}
+
 NAPI_METHOD(fuse_native_invalidate_entry) {
   NAPI_ARGV(4)
   NAPI_ARGV_BUFFER_CAST(fuse_thread_t *, ft, 0);
@@ -3930,6 +4093,8 @@ NAPI_INIT() {
   NAPI_EXPORT_FUNCTION(fuse_native_cancel_mount)
   NAPI_EXPORT_FUNCTION(fuse_native_unmount)
   NAPI_EXPORT_FUNCTION(fuse_native_invalidate_entry)
+  NAPI_EXPORT_FUNCTION(fuse_native_backing_open)
+  NAPI_EXPORT_FUNCTION(fuse_native_backing_close)
   NAPI_EXPORT_FUNCTION(fuse_native_notify_poll)
   NAPI_EXPORT_FUNCTION(fuse_native_close_poll)
   NAPI_EXPORT_FUNCTION(fuse_native_runtime_info)

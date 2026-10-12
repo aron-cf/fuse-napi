@@ -21,6 +21,8 @@ const invalidationFuse = new Fuse(mountpoint, {})
 invalidationFuse.invalidateEntry('/file', err => {
   if (err) throw err
 })
+const backingId: number = invalidationFuse.backingOpen(3)
+invalidationFuse.backingClose(backingId)
 
 new Fuse(mountpoint, {
   initWithConfig (connection, cb) {
@@ -28,8 +30,9 @@ new Fuse(mountpoint, {
     void maxRead
     cb(0, {
       maxWrite: connection.maxWrite,
-      want: connection.capable,
-      asyncRead: false
+      want: connection.capable & Fuse.CAP_PASSTHROUGH,
+      asyncRead: false,
+      maxBackingStackDepth: 1
     })
   },
   readdirPaged (path, fd, offset, cb) {
@@ -48,6 +51,8 @@ new Fuse(mountpoint, {
       keepCache: false,
       nonseekable: false
     })
+    const backed: Fuse.FileInfoResult = { fd: 1, backingId: 1 }
+    void backed
   },
   utimensWithTimespec (path, atime, mtime, cb) {
     void path

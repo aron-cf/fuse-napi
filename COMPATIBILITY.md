@@ -12,7 +12,7 @@ The native layer targets the FUSE 3.1 high-level API
 
 | JavaScript callback | Linux libfuse 3 | macFUSE libfuse 3 | Current status and differences |
 | --- | --- | --- | --- |
-| `init(cb)` / `initWithConfig(connection, cb)` | Yes | Yes | Legacy defaults remain unchanged. The enhanced variant exposes and validates the portable FUSE 3 connection fields, including the active `maxRead`, before applying conservative limits/capabilities. Public mount completion waits until the mounted device is visible. |
+| `init(cb)` / `initWithConfig(connection, cb)` | Yes | Yes | Legacy defaults remain unchanged. The enhanced variant exposes and validates the portable FUSE 3 connection fields, including the active `maxRead`, before applying conservative limits/capabilities. Linux passthrough mounts may also set `maxBackingStackDepth`. Public mount completion waits until the mounted device is visible. |
 | `access(path, mode, cb)` | Yes | Yes | Shared implementation. Suppressed by `default_permissions`. |
 | `statfs(path, cb)` | Yes | Yes | Shared `struct statvfs` implementation with range-checked 64-bit fields. macFUSE also offers unsupported `statfs_x`. |
 | `getattr(path, cb)` | Yes | Yes | Shared, zero-initialized implementation with range-checked 64-bit fields and platform-specific timestamp members. A null path is routed to `fgetattr`. |
@@ -32,13 +32,13 @@ The native layer targets the FUSE 3.1 high-level API
 | `getxattr(path, name, position, cb)` | Yes | Yes | Callback returns a `Buffer`; validated bytes are copied into the native request only on completion. Round trips, listing, removal, and resource forks are covered. |
 | `listxattr(path, cb)` | Yes | Yes | Uses an exact UTF-8/NUL size probe, request-owned output storage, and returns `ERANGE` when the caller buffer is too small. |
 | `removexattr(path, name, cb)` | Yes | Yes | Shared implementation. |
-| `open(path, flags, cb)` | Yes | Yes | Shared implementation; primitive handles remain compatible and `{ fd, directIO, keepCache, nonseekable }` can set portable result bits. |
+| `open(path, flags, cb)` | Yes | Yes | Shared implementation; primitive handles remain compatible and `{ fd, directIO, keepCache, nonseekable }` can set portable result bits. On Linux, `backingId` enables kernel passthrough (see below). |
 | `opendir(path, flags, cb)` | Yes | Yes | Forwards open flags and accepts the same validated file-info result as `open`. |
 | `read(path, fd, buffer, length, position, cb)` | Yes | Yes | Signed 64-bit positions and lossless handles; uses owned output memory and copies only a validated byte count to FUSE. |
 | `write(path, fd, buffer, length, position, cb)` | Yes | Yes | Signed 64-bit positions and lossless handles; JavaScript receives an owned copy of the native request bytes. |
 | `release(path, fd, cb)` | Yes | Yes | Shared implementation; return value is ignored by FUSE. |
 | `releasedir(path, fd, cb)` | Yes | Yes | Shared implementation. |
-| `create(path, mode, cb)` / `createWithFlags(path, mode, flags, cb)` | Yes | Yes | Legacy mode is unchanged. The mutually exclusive enhanced variant also receives the original open flags; both accept enriched file-info results. |
+| `create(path, mode, cb)` / `createWithFlags(path, mode, flags, cb)` | Yes | Yes | Legacy mode is unchanged. The mutually exclusive enhanced variant also receives the original open flags; both accept enriched file-info results, including a Linux passthrough `backingId`. |
 | `unlink(path, cb)` | Yes | Yes | Shared implementation; deletion while an open handle survives is covered on macOS. |
 | `rename(src, dest, cb)` / `renameWithFlags(src, dest, flags, cb)` | Yes | Yes | The legacy callback accepts unflagged renames only. The enhanced variant preserves FUSE 3 rename flags instead of silently discarding them. |
 | `link(src, dest, cb)` | Yes | Yes | Shared implementation. |
@@ -131,6 +131,13 @@ configurations before libfuse is invoked.
 to evict one cached namespace entry without unlinking it. It supports nested
 paths on Linux, must run outside filesystem operation callbacks, and reports
 `ENOSYS` when the connected kernel lacks entry-invalidation support.
+
+`fuse.backingOpen(fd)` and `fuse.backingClose(id)` register and release Linux
+FUSE passthrough backing files (Linux 6.9+, libfuse 3.17+). An `open` or
+`create` result carrying the returned `backingId` lets the kernel serve that
+handle's reads, writes, and `mmap` directly. A `backingId` is rejected with
+`keepCache`, `directIO`, `kernelCache`, `autoCache`, or `directIo`. Builds
+against older libfuse report `ENOTSUP`; macFUSE does not support passthrough.
 
 Historical native libfuse spellings are normalized before validation:
 `allow_other`, `allow_root`, `auto_unmount`, `default_permissions`,
