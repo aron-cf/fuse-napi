@@ -218,6 +218,9 @@ tape('timed-out requests and native teardown remain bounded across cycles', func
         }
       }, {
         force: true,
+        // This test checks the exact daemon errno. Cached reads can expose
+        // EIO after a failed page-cache fill instead of ETIMEDOUT on Linux.
+        directIo: true,
         timeout: { default: 5000, read: 10 },
         maxConcurrency: 4
       })

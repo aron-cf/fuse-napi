@@ -522,6 +522,37 @@ tape('operation failures, duplicate callbacks, and timeouts signal exactly once'
   }
 })
 
+tape('timed-out reads preserve native errno and ignore late callbacks', async function (t) {
+  const originalSignal = binding.fuse_native_signal_read
+  const calls = []
+  let complete
+  let delivered
+  const signalled = new Promise(resolve => { delivered = resolve })
+  binding.fuse_native_signal_read = function (nativeHandler, result) {
+    calls.push(result)
+    delivered()
+  }
+  try {
+    const fuse = new Fuse('/tmp/fuse-napi-read-timeout', {
+      read (name, fd, buffer, length, position, cb) {
+        complete = cb
+      }
+    }, { timeout: { default: false, read: 10 } })
+    const buffer = Buffer.alloc(4)
+    t.timeoutAfter(1000)
+    fuse._handlers[binding.op_read]({}, binding.op_read, '/file', 1, buffer, buffer.length, 0, 0)
+    await signalled
+    t.deepEqual(calls, [Fuse.ETIMEDOUT], 'the native boundary receives the original timeout errno')
+    complete(buffer.length)
+    complete(Fuse.EIO)
+    await new Promise(resolve => setImmediate(resolve))
+    t.deepEqual(calls, [Fuse.ETIMEDOUT], 'late success and error callbacks cannot send another native response')
+    t.doesNotThrow(() => buffer.write('safe'), 'the JavaScript request buffer survives completion')
+  } finally {
+    binding.fuse_native_signal_read = originalSignal
+  }
+})
+
 tape('64-bit statistics, offsets, and file handles remain lossless', function (t) {
   const large = 0x20000000000001n
   const beforeEpoch = -2208988800123

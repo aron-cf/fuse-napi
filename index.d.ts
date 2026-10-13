@@ -503,7 +503,11 @@ declare namespace Fuse {
     autoCache?: boolean;
     /** Native libfuse spelling for autoCache. */
     auto_cache?: boolean;
-    /** Enable direct I/O for every opened file through fuse_config. */
+    /**
+     * Enable direct I/O for every opened file through fuse_config.
+     * Bypasses the page cache; Linux reads retain the original FUSE errno
+     * instead of the generic EIO possible after a failed cached read.
+     */
     directIo?: boolean;
     /** Historical native spelling for directIo. */
     direct_io?: boolean;

@@ -232,6 +232,15 @@ extended attributes, statistics, and mount options are validated before they
 cross the native boundary. Unknown option and operation names are rejected so
 configuration mistakes cannot silently change filesystem behavior.
 
+Operation deadlines reply to FUSE with `ETIMEDOUT`. Linux cached reads can
+instead expose `EIO` to the caller when filling a page-cache entry fails.
+To preserve the original read errno, use `directIo: true` for the mount or
+return `{ fd, directIO: true }` from `open` or `create`. Direct I/O bypasses
+the page cache and has different caching and `mmap` semantics. A deadline
+does not cancel work already started by the handler: late callbacks are
+ignored, and request-owned buffers remain valid after completion and
+teardown.
+
 `Fuse.validateOptions(options)` performs the same synchronous validation
 without creating a filesystem instance. Invalid combinations throw a
 `TypeError` with a stable `code` and an `options` array. The FUSE 3 preflight
